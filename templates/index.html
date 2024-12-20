@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>소셜 스마트 버스정류장</title>
+    <link rel="stylesheet" href="../static/mystyles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.2/mqttws31.min.js" type="text/javascript"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="./static/indexMqttio.js"></script>
+    <script>
+        // 페이지가 로드될 때 MQTT 연결을 설정
+        window.addEventListener("load", function () {
+            connect();
+        });
+    </script>
+    <style>
+        .canvas-container {
+            position: relative;  /* 부모 요소에 대해 상대적 위치를 부여 */
+        }
+
+        #mapCanvas {
+            display: block;  /* 캔버스를 블록 요소로 표시 */
+        }
+
+        /* 각 정류장에 대한 승차/취소 버튼 폼 스타일 */
+        #BTN-control-form1 {
+            position: absolute;  
+            top: 440px;  
+            left: 977px; 
+            background-color: rgba(255, 255, 255, 0.8);  
+            padding: 10px; 
+            border-radius: 10px; 
+        }
+
+        #BTN-control-form2 {
+            position: absolute;
+            top: 480px;
+            left: 713px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        #BTN-control-form3 {
+            position: absolute;
+            top: 514px;
+            left: 257px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 10px;
+        }
+        
+        #BTN-control-form4 {
+            position: absolute;
+            top: 120px;
+            left: 217px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        #BTN-control-form5 {
+            position: absolute;
+            top: 110px;
+            left: 650px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h2>소셜 스마트 버스정류장</h2>
+        <div class="menu">
+            <!-- 각 차트 및 스몰톡 페이지로 이동하는 메뉴 -->
+            <a href="/temperature-chart">온도 그래프</a>
+            <a href="/humidity-chart">습도 그래프</a>
+            <a href="/distance-chart">거리 그래프</a>
+            <a href="/light-chart">조도 그래프</a>
+            <a href="/smalltalk">스몰톡 주제 추천</a>
+        </div>
+    </div>
+    
+    <div class="canvas-container">
+        <!-- 각 정류장에 대한 승차 및 취소 버튼 폼을 캔버스 위에 겹치도록 배치 -->
+        <form id="BTN-control-form1">
+            <label><input type="button" id="stopOn1" name="stop" value="승차" onclick="publish('stop1', 1)"></label>
+            <label><input type="button" id="stopOff1" name="stop" value="취소" onclick="publish('stop1', 0)"><br><br></label>
+        </form>
+
+        <form id="BTN-control-form2">
+            <label><input type="button" id="stopOn2" name="stop" value="승차" onclick="publish('stop2', 1)"></label>
+            <label><input type="button" id="stopOff2" name="stop" value="취소" onclick="publish('stop2', 0)"><br><br></label>
+        </form>
+
+        <form id="BTN-control-form3">
+            <label><input type="button" id="stopOn3" name="stop" value="승차" onclick="publish('stop3', 1)"></label>
+            <label><input type="button" id="stopOff3" name="stop" value="취소" onclick="publish('stop3', 0)"><br><br></label>
+        </form>
+
+        <form id="BTN-control-form4">
+            <label><input type="button" id="stopOn4" name="stop" value="승차" onclick="publish('stop4', 1)"></label>
+            <label><input type="button" id="stopOff4" name="stop" value="취소" onclick="publish('stop4', 0)"><br><br></label>
+        </form>
+
+        <form id="BTN-control-form5">
+            <label><input type="button" id="stopOn5" name="stop" value="승차" onclick="publish('stop5', 1)"></label>
+            <label><input type="button" id="stopOff5" name="stop" value="취소" onclick="publish('stop5', 0)"><br><br></label>
+        </form>
+        
+        <!-- 버스 이동을 표시할 캔버스 -->
+        <canvas id="mapCanvas" width="1440" height="650" style="background: url('../static/backImg1.png') no-repeat center center; background-size: cover;"></canvas>
+    </div>
+    
+    <script>
+        // 페이지가 로드되었을 때 실행되는 함수
+        window.onload = function() {
+            const canvas = document.getElementById('mapCanvas');
+            const ctx = canvas.getContext('2d');
+    
+            // 정류장의 위치 좌표 설정
+            const stops = [
+                { x: 1028, y: 520 },
+                { x: 764, y: 563 },
+                { x: 309, y: 598 },
+                { x: 267, y: 70 },
+                { x: 702, y: 64 }
+            ];
+    
+            // 정류장 색 상태를 추적하는 배열 (흰색: false, 빨간색: true)
+            const stopColors = [false, false, false, false, false];
+    
+            // 버스 객체 정의
+            class Bus {
+                constructor() {
+                    this.image = new Image();  // 버스 이미지 생성
+                    this.image.src = './static/bus.png';  // 버스 이미지 경로 설정
+                    this.position = { x: 900, y: 500 }; // 버스의 초기 위치 설정
+                    this.currentStopIndex = 0; // 현재 향하고 있는 정류장의 인덱스
+                    this.path = [
+                        { x: 1028, y: 520 },  // 첫 번째 도착점
+                        { x: 220, y: 600 },   // 두 번째 도착점
+                        { x: 220, y: 80 },    // 세 번째 도착점
+                        { x: 1070, y: 80 },   // 네 번째 도착점
+                        { x: 1070, y: 560 }   // 다섯 번째 도착점
+                    ];
+                    this.currentIndex = 0; // 현재 위치의 인덱스
+                    this.nextIndex = 1; // 다음으로 이동할 위치의 인덱스
+                    this.speed = 3; // 버스 이동 속도 설정
+                }
+    
+                // 버스 위치 업데이트 함수
+                updatePosition() {
+                    const dx = this.path[this.nextIndex].x - this.position.x; // x 방향 거리 계산
+                    const dy = this.path[this.nextIndex].y - this.position.y; // y 방향 거리 계산
+                    const distance = Math.sqrt(dx * dx + dy * dy); // 두 점 사이의 거리 계산
+    
+                    if (distance > this.speed) {
+                        const unitDx = dx / distance; // 단위 방향 벡터 x 성분
+                        const unitDy = dy / distance; // 단위 방향 벡터 y 성분
+                        this.position.x += unitDx * this.speed; // x 방향 위치 업데이트
+                        this.position.y += unitDy * this.speed; // y 방향 위치 업데이트
+                    } else {
+                        // 다음 지점에 도달했으면 인덱스 업데이트
+                        this.currentIndex = this.nextIndex;
+                        this.nextIndex = (this.nextIndex + 1) % this.path.length; // 경로 순환
+                        this.currentStopIndex = this.nextIndex; // 현재 정류장 인덱스 업데이트
+                    }
+    
+                    // 정류장 위치를 지날 때 정류장 색상 초기화
+                    checkBusPassingStops();
+                }
+    
+                // 버스 그리기 함수
+                draw() {
+                    ctx.drawImage(this.image, this.position.x - 20, this.position.y - 20, 40, 40); // 버스 이미지 그리기
+                }
+            }
+    
+            // 버스 객체 생성
+            const bus = new Bus();
+    
+            // 정류장 그리기 함수 (흰색 또는 빨간색으로 그리기)
+            function drawStops() {
+                stops.forEach((stop, index) => {
+                    ctx.beginPath();
+                    ctx.arc(stop.x, stop.y, 10, 0, 2 * Math.PI); // 원 그리기 (정류장 위치 표시)
+                    ctx.fillStyle = stopColors[index] ? 'red' : 'white'; // 정류장의 색상 설정
+                    ctx.fill();
+                    ctx.stroke(); // 정류장 원 그리기 완료
+                });
+            }
+    
+            // stopOn 버튼을 눌렀을 때 해당 정류장을 빨간색으로 변경
+            function highlightStop(index) {
+                stopColors[index] = true; // 정류장을 빨간색으로 설정
+                publishStopState(index, 1); // MQTT 메시지 퍼블리시
+            }
+    
+            // stopOff 버튼을 눌렀을 때 해당 정류장을 흰색으로 변경
+            function resetStop(index) {
+                stopColors[index] = false; // 정류장을 흰색으로 설정
+                publishStopState(index, 0); // MQTT 메시지 퍼블리시
+            }
+    
+            // MQTT 퍼블리시 함수 비동기 호출
+            function publishStopState(index, state) {
+                setTimeout(() => {
+                    publish(`stop${index + 1}`, state);
+                }, 0); // 비동기적 호출로 애니메이션 중단 방지
+            }
+    
+            // 버튼 클릭 이벤트 추가
+            document.getElementById('stopOn1').addEventListener('click', () => highlightStop(0));
+            document.getElementById('stopOff1').addEventListener('click', () => resetStop(0));
+            document.getElementById('stopOn2').addEventListener('click', () => highlightStop(1));
+            document.getElementById('stopOff2').addEventListener('click', () => resetStop(1));
+            document.getElementById('stopOn3').addEventListener('click', () => highlightStop(2));
+            document.getElementById('stopOff3').addEventListener('click', () => resetStop(2));
+            document.getElementById('stopOn4').addEventListener('click', () => highlightStop(3));
+            document.getElementById('stopOff4').addEventListener('click', () => resetStop(3));
+            document.getElementById('stopOn5').addEventListener('click', () => highlightStop(4));
+            document.getElementById('stopOff5').addEventListener('click', () => resetStop(4));
+    
+            // 버스가 정류장을 지날 때 정류장을 흰색으로 초기화
+            function checkBusPassingStops() {
+                stops.forEach((stop, index) => {
+                    // 넓은 범위로 조건을 변경하여 버스가 정류장을 통과하는지 판단
+                    if (
+                        Math.abs(bus.position.x - stop.x) <= 40 && // 범위를 조금 더 넓혀서 통과 판정
+                        Math.abs(bus.position.y - stop.y) <= 40 &&
+                        stopColors[index]
+                    ) {
+                        // 상태를 흰색으로 되돌리기
+                        setTimeout(() => {
+                            stopColors[index] = false;
+                            publishStopState(index, 0); // 상태를 흰색으로 되돌리고 퍼블리시 비동기 호출
+                        }, 200);
+                    }
+                });
+            }
+    
+            // 애니메이션 루프 설정
+            bus.image.onload = function() {
+                function animate() {
+                    // 캔버스 지우기 및 다시 그리기
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    drawStops(); // 정류장 동그라미 먼저 그리기
+                    bus.updatePosition();
+                    bus.draw(); // 버스를 그리기
+    
+                    requestAnimationFrame(animate); // 다음 애니메이션 프레임 요청
+                }
+    
+                // 애니메이션 시작
+                animate();
+            };
+        }
+    </script>    
+    
+</body>
+</html>

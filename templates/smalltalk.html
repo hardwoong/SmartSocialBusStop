@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스몰 톡 주제 추천</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.2/mqttws31.min.js" type="text/javascript"></script>
+    <script src="./static/smalltalkMqttio.js" type="text/javascript"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            font-family: 'Noto Sans KR', sans-serif; /* 모든 글꼴을 'Noto Sans KR'로 설정 */
+            box-sizing: border-box; /* 모든 엘리먼트에 border-box를 적용하여 패딩과 테두리를 포함한 크기를 지정 */
+        }
+
+        html.body {
+            margin: 0;
+            padding: 0; /* 기본 여백과 패딩을 제거 */
+        }
+
+        #app {
+            text-align: center; /* 중앙 정렬 */
+            margin-bottom: 10px; /* 하단에 10px 여백 추가 */
+        }
+
+        .roulette-outer {
+            position: relative; /* 내부 요소 위치 조정을 위한 relative 설정 */
+            overflow: hidden; /* 넘치는 콘텐츠를 숨김 */
+            width: 500px;
+            height: 500px; /* 룰렛의 크기를 500x500px로 설정 */
+            font-size: 20px; /* 글자 크기 설정 */
+            margin-left: auto;
+            margin-right: auto; /* 수평 가운데 정렬 */
+            background: #bdc3c7; /* 룰렛 배경색 설정 */
+        }
+
+        .roulette-outer > .roulette {
+            position: absolute;
+            top: 5%;
+            left: 5%;
+            right: 5%;
+            bottom: 5%; /* 전체에서 5%씩 여백을 두어 크기 설정 */
+            border-radius: 50%; /* 원형으로 만들기 위해 반지름 설정 */
+            border: 2px solid black; /* 검은색 테두리 설정 */
+        }
+
+        .roulette-outer > .roulette-pin {
+            position: absolute;
+            z-index: 10; /* 룰렛 핀을 최상위에 위치시키기 위해 z-index 설정 */
+            top: 3%;
+            left: 50%; /* 왼쪽에서 50%로 설정하여 가운데 정렬 */
+            width: 0;
+            height: 0; 
+            border-style: solid; /* 테두리 스타일을 solid로 설정 */
+            border-width: 30px 5px 0 5px; /* 삼각형 모양을 위한 테두리 크기 설정 */
+            border-color: #ff0000 transparent transparent transparent; /* 빨간색 삼각형 모양 핀 설정 */
+            margin-left: -5px; /* 가운데 정렬을 위해 왼쪽으로 5px 이동 */
+        }
+
+        .roulette-outer > .roulette > .item-wrapper > .item {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding-top: 10%; /* 위쪽 여백 추가 */
+            text-align: center; /* 텍스트 중앙 정렬 */
+            display: flex;
+            justify-content: center; /* 가로축 중앙 정렬 */
+        }
+
+        .roulette-outer > .roulette > .line-wrapper > .line {
+            position: absolute;
+            top: 0;
+            bottom: 50%;
+            left: 50%;
+            width: 2px;
+            margin-left: -1px; /* 선의 두께에 맞게 가운데 정렬 */
+            background: black; /* 선 색을 검은색으로 설정 */
+            transform-origin: bottom; /* 회전의 기준점을 선의 아래쪽으로 설정 */
+        }
+
+        .roulette-outer > .roulette {
+            transition: transform 3s ease-in-out; /* 룰렛 회전 애니메이션 설정 */
+        }
+
+        #shoot-btn {
+            position: absolute;
+            left: 10px;
+            top: 10px; /* 화면 왼쪽 상단에 위치하도록 설정 */
+        }
+    </style>
+</head>
+<body>
+    <br><br><br><br> <!-- 위쪽에 여백을 추가하여 중앙에 배치 -->
+    <div id="app">
+
+        <div class="roulette-outer" id="roulette-outer">
+            <div class="roulette-pin"></div> <!-- 룰렛 핀 표시 -->
+            <div class="roulette" id="roulette">
+
+                <!-- 값 영역 -->
+                <div class="item-wrapper" id="item-wrapper"></div>
+
+                <!-- 선 영역 -->
+                <div class="line-wrapper" id="line-wrapper"></div>
+            </div>
+        </div>
+
+        <button class="play-btn" id="play-btn" style="background: url('./static/start.png'); width: 100px; height: 100px; background-size: cover; border: none;"></button> <!-- 시작 버튼, 이미지로 대체 -->
+        <button class="shoot-btn" id="shoot-btn" style="background: url('./static/camera.png'); width: 70px; height: 50px; background-size: cover; border: none;"></button> <!-- 촬영 버튼, 이미지로 대체 -->
+    </div>
+    <script>
+        // 봄, 여름, 가을, 겨울에 따른 룰렛 항목 정의
+        let itemsSpring = [
+            { value: "벚꽃" },
+            { value: "피크닉" },
+            { value: "봄과일" },
+            { value: "꽃가루" },
+            { value: "새출발" },
+            { value: "봄패션" },
+            { value: "식물" },
+            { value: "목표" },
+            { value: "봄나들이" },
+            { value: "봄꽃 축제" }
+        ];
+        let itemsSummer = [
+            { value: "바다/산" },
+            { value: "캠핑" },
+            { value: "냉면" },
+            { value: "자외선" },
+            { value: "장마" },
+            { value: "여름패션" },
+            { value: "더위" },
+            { value: "여름간식" },
+            { value: "수영" },
+            { value: "여름휴가" }
+        ];
+        let itemsFall = [
+            { value: "단풍" },
+            { value: "가을간식" },
+            { value: "추석" },
+            { value: "등산" },
+            { value: "독서" },
+            { value: "공방" },
+            { value: "카페" },
+            { value: "가을패션" },
+            { value: "낙엽" },
+            { value: "감성 음악" }
+        ];
+        let itemsWinter = [
+            { value: "겨울간식" },
+            { value: "스키/보드" },
+            { value: "연말" },
+            { value: "얼죽아" },
+            { value: "겨울패션" },
+            { value: "크리스마스" },
+            { value: "눈사람/눈싸움" },
+            { value: "산타" },
+            { value: "핫초코" },
+            { value: "겨울철 건강 관리" }
+        ];
+        let items = []; // 현재 선택된 계절의 항목들을 저장할 배열
+        let segment = 0; // 룰렛 항목의 각도 세그먼트
+        let offset = 0; // 룰렛 항목의 각도 오프셋
+        let current = 0; // 현재 선택된 항목의 인덱스
+        let count = 0; // 룰렛이 회전한 횟수
+    
+        document.addEventListener("DOMContentLoaded", function() {
+            // DOM 요소 가져오기
+            const itemWrapper = document.getElementById("item-wrapper");
+            const lineWrapper = document.getElementById("line-wrapper");
+            const playButton = document.getElementById("play-btn");
+            const roulette = document.getElementById("roulette");
+            const rouletteOuter = document.getElementById("roulette-outer");
+            const shootButton = document.getElementById("shoot-btn");
+    
+            // Play 버튼 클릭 이벤트 리스너 추가
+            playButton.addEventListener("click", function() {
+                playButton.disabled = true; // 버튼 비활성화
+                count++; // 회전 횟수 증가
+                current = Math.floor(Math.random() * items.length); // 랜덤으로 항목 선택
+                const temp = current * segment; // 현재 항목의 각도 계산
+                const randomOffset = Math.floor(Math.random() * segment) - offset - 1; // 랜덤 오프셋 추가
+                const cycle = count * 360 * 5; // 룰렛이 몇 바퀴 돌지 계산 (5 바퀴)
+                const angle = -(temp + randomOffset + cycle); // 최종 회전 각도 계산
+    
+                // 룰렛 회전 애니메이션 적용
+                roulette.style.transform = "rotate(" + angle + "deg)";
+    
+                // 룰렛 회전 후 결과 알림
+                setTimeout(() => {
+                    playButton.disabled = false; // 버튼 다시 활성화
+                    let resultMessage = "";
+    
+                    // switch 문으로 결과 메시지 설정
+                    switch (items[current].value) {
+                        case "벚꽃":
+                            resultMessage = "벚꽃 좋아하시나요? 벚꽃 경치가 예쁜 장소를 추천해주세요!";
+                            break;
+                        case "피크닉":
+                            resultMessage = "날씨가 좋아요! 피크닉은 좋아하시나요?";
+                            break;
+                        case "봄과일":
+                            resultMessage = "봄 딸기가 유명하죠! 따로 좋아하시는 봄 과일이 있으신가요?";
+                            break;
+                        case "꽃가루":
+                            resultMessage = "봄이라 꽃가루가 많이 날려요! 알러지가 있으시다면 관리하고 계신가요?";
+                            break;
+                        case "새출발":
+                            resultMessage = "봄은 새로운 시작을 하기 좋은 계절이에요. 올해 새로운 계획이 있으신가요?";
+                            break;
+                        case "봄패션":
+                            resultMessage = "봄이 되면 가벼운 옷차림이 떠오르죠. 어떤 봄 패션을 좋아하시나요?";
+                            break;
+                        case "식물":
+                            resultMessage = "봄엔 식물 키우기 딱 좋은 시기죠. 어떤 식물을 키우고 계신가요?";
+                            break;
+                        case "목표":
+                            resultMessage = "봄을 맞아 세운 목표가 있으신가요? 작은 목표라도 공유해주세요!";
+                            break;
+                        case "봄나들이":
+                            resultMessage = "날씨가 좋아서 나들이 가기 좋은 때예요. 어디로 가고 싶으세요?";
+                            break;
+                        case "봄꽃 축제":
+                            resultMessage = "봄꽃 축제가 한창이에요! 가장 좋아하는 봄꽃 축제가 있으신가요?";
+                            break;
+                        case "바다/산":
+                            resultMessage = "바다가 좋으세요? 산이 좋으세요?";
+                            break;
+                        case "캠핑":
+                            resultMessage = "캠핑 좋아하세요? 어디로 가고 싶으세요?";
+                            break;
+                        case "냉면":
+                            resultMessage = "여름엔 냉면이죠! 어떤 냉면이 맛있나요?";
+                            break;
+                        case "자외선":
+                            resultMessage = "자외선 관리 잘 바르고 계신가요? 여름철 피부 관리 팁이 있으신가요?";
+                            break;
+                        case "장마":
+                            resultMessage = "장마철이 다가오네요. 비 오는 날엔 어떻게 시간을 보내세요?";
+                            break;
+                        case "여름패션":
+                            resultMessage = "여름엔 시원한 옷차림이 필수죠. 어떤 여름 패션을 즐기시나요?";
+                            break;
+                        case "더위":
+                            resultMessage = "더위를 피할 수 있는 좋은 방법이 있으신가요?";
+                            break;
+                        case "여름간식":
+                            resultMessage = "여름엔 아이스크림이나 수박 같은 간식이 최고죠. 좋아하는 여름 간식은 무엇인가요?";
+                            break;
+                        case "수영":
+                            resultMessage = "수영 좋아하시나요? 여름엔 수영장이 제격이죠!";
+                            break;
+                        case "여름휴가":
+                            resultMessage = "여름휴가 계획은 세우셨나요? 어디로 떠나고 싶으세요?";
+                            break;
+                        case "단풍":
+                            resultMessage = "단풍이 예쁜 가을이에요! 단풍 명소를 추천해주세요!";
+                            break;
+                        case "가을간식":
+                            resultMessage = "가을엔 군밤이죠! 아니라면 다른 간식 알려주실래요?";
+                            break;
+                        case "추석":
+                            resultMessage = "즐거운 한가위가 다가와요! 추석에 어딘가 다녀오셨거나 다녀오실 예정이라면 어디일까요?";
+                            break;
+                        case "등산":
+                            resultMessage = "가을엔 등산이 제격이죠! 등산 좋아하시나요?";
+                            break;
+                        case "독서":
+                            resultMessage = "가을은 독서의 계절이죠. 요즘 읽고 있는 책이 있으신가요?";
+                            break;
+                        case "공방":
+                            resultMessage = "가을엔 공방에서 무언가 만들어 보는 것도 재미있어요. 어떤 공예를 해보고 싶으세요?";
+                            break;
+                        case "카페":
+                            resultMessage = "가을엔 따뜻한 차 한 잔과 함께 카페에서 시간을 보내기 좋죠. 좋아하는 카페 음료는 무엇인가요?";
+                            break;
+                        case "가을패션":
+                            resultMessage = "가을엔 니트나 트렌치코트가 잘 어울리죠. 어떤 가을 패션을 즐기시나요?";
+                            break;
+                        case "낙엽":
+                            resultMessage = "길거리에 떨어진 낙엽을 밟으면 기분이 좋아지죠. 낙엽 구경해본 적 있으신가요?";
+                            break;
+                        case "감성 음악":
+                            resultMessage = "가을엔 감성적인 음악이 잘 어울리죠. 요즘 즐겨 듣는 음악이 있으신가요?";
+                            break;
+                        case "겨울간식":
+                            resultMessage = "붕어빵을 넘어서는 겨울 간식이 있을까요? 있다면 알려주세요!";
+                            break;
+                        case "스키/보드":
+                            resultMessage = "스키와 보드 중 어떤 것을 즐겨 타시나요?";
+                            break;
+                        case "연말":
+                            resultMessage = "연말이에요! 한 해의 마무리 잘 하고 계신가요?";
+                            break;
+                        case "얼죽아":
+                            resultMessage = "날씨가 추워도 차가운 음료를 즐기시나요?";
+                            break;
+                        case "겨울패션":
+                            resultMessage = "겨울엔 롱패딩과 모자가 필수죠. 어떤 겨울 패션을 좋아하시나요?";
+                            break;
+                        case "크리스마스":
+                            resultMessage = "크리스마스는 어떻게 보내실 예정인가요? 특별한 계획이 있으신가요?";
+                            break;
+                        case "눈사람/눈싸움":
+                            resultMessage = "눈사람을 만들거나 눈싸움을 해본 적 있으세요? 겨울만의 즐거움이죠!";
+                            break;
+                        case "산타":
+                            resultMessage = "산타클로스를 믿었던 시절이 그립네요. 산타와 관련된 추억이 있으신가요?";
+                            break;
+                        case "핫초코":
+                            resultMessage = "겨울엔 따뜻한 핫초코 한 잔이 최고죠! 좋아하는 핫초코 토핑이 있으신가요?";
+                            break;
+                        case "겨울철 건강 관리":
+                            resultMessage = "겨울철 건강 관리를 위해 특별히 신경 쓰는 점이 있으신가요?";
+                            break;
+                        default:
+                            resultMessage = items[current].value + "에 대해서 어떻게 생각하세요?";
+                    }
+    
+                    alert(resultMessage); // 결과 메시지 알림창으로 표시
+                }, 4000);
+            });
+    
+            // Shoot 버튼 클릭 이벤트 리스너 추가
+            shootButton.addEventListener("click", function() {
+                console.log("Shoot button clicked. Publishing to 'shoot' topic.");
+                publish("shoot", "true"); // 'shoot' 토픽으로 메시지 발행
+            });
+    
+            // MQTT 연결 설정 함수 호출 (connect 함수 가정)
+            connect();
+        });
+    
+        // 온도에 따라 계절을 결정하고, 해당 계절의 항목 설정
+        function decideSeason(temper) {
+            const rouletteOuter = document.getElementById("roulette-outer");
+            if (temper > 22) {
+                items = itemsSummer; // 여름 항목 설정
+                rouletteOuter.style.background = "none";
+                roulette.style.background = "#FFD700"; // 여름 - 금색
+                document.body.style.backgroundImage = "url('./static/summer.png')";
+                document.body.style.width = "1440px";
+                document.body.style.height = "650px";
+            } else if (temper <= 22 && temper > 16) {
+                items = itemsSpring; // 봄 항목 설정
+                rouletteOuter.style.background = "none";
+                roulette.style.background = "#98FB98"; // 봄 - 연한 초록색
+                document.body.style.backgroundImage = "url('./static/spring.png')";
+                document.body.style.width = "1440px";
+                document.body.style.height = "650px";
+            } else if (temper <= 16 && temper > 10) {
+                items = itemsFall; // 가을 항목 설정
+                rouletteOuter.style.background = "none";
+                roulette.style.background = "#FF8C00"; // 가을 - 주황색
+                document.body.style.backgroundImage = "url('./static/fall.png')";
+                document.body.style.width = "1440px";
+                document.body.style.height = "650px";
+            } else {
+                items = itemsWinter; // 겨울 항목 설정
+                rouletteOuter.style.background = "none";
+                roulette.style.background = "#ADD8E6"; // 겨울 - 연한 파란색
+                document.body.style.backgroundImage = "url('./static/winter.png')";
+                document.body.style.width = "1440px";
+                document.body.style.height = "650px";
+            }
+            updateItems(); // 항목 업데이트 호출
+        }
+    
+        // 선택된 계절에 맞게 룰렛 항목 업데이트
+        function updateItems() {
+            segment = 360 / items.length; // 각 항목의 각도 세그먼트 계산
+            offset = segment / 2; // 각도 오프셋 계산
+    
+            const itemWrapper = document.getElementById("item-wrapper");
+            const lineWrapper = document.getElementById("line-wrapper");
+            itemWrapper.innerHTML = ''; // 기존 항목 제거
+            lineWrapper.innerHTML = ''; // 기존 선 제거
+    
+            items.forEach((item, idx) => {
+                // 항목 생성 및 설정
+                const itemElement = document.createElement("div");
+                itemElement.className = "item";
+                itemElement.textContent = item.value;
+                itemElement.style.transform = "rotate(" + (segment * idx) + "deg)";
+                itemWrapper.appendChild(itemElement);
+    
+                // 구분선 생성 및 설정
+                const lineElement = document.createElement("div");
+                lineElement.className = "line";
+                lineElement.style.transform = "rotate(" + (segment * idx + offset) + "deg)";
+                lineWrapper.appendChild(lineElement);
+            });
+        }
+    </script>
+    
+</body>
+</html>
